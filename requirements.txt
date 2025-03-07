@@ -1,0 +1,10 @@
+newspaper3k==0.2.8
+vaderSentiment==3.3.2
+nltk==3.8.1
+pandas==2.0.3
+plotly==5.15.0
+reportlab==4.0.4
+gnews==0.3.7
+trafilatura==1.6.2
+requests==2.31.0
+beautifulsoup4==4.12.2
