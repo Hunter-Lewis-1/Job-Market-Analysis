@@ -26,20 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Check if spaCy is available, otherwise use basic filtering
-try:
-    import spacy
-    try:
-        nlp = spacy.load("en_core_web_sm")
-    except OSError:
-        import sys
-        import subprocess
-        subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
-        nlp = spacy.load("en_core_web_sm")
-    SPACY_AVAILABLE = True
-except ImportError:
-    SPACY_AVAILABLE = False
-    logger.warning("spaCy not available. Using basic context filtering.")
+nlp = spacy.load("en_core_web_sm")
 
 # Top business news sites with RSS feeds (name, url, has_full_text)
 RSS_FEEDS = [
