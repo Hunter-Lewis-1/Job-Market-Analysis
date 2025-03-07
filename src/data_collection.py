@@ -1,133 +1,244 @@
-import requests
-from bs4 import BeautifulSoup
-import time
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+RSS Feed-based News Collector for Sentiment Analysis
+"""
+
+import os
+import re
 import logging
-from urllib.parse import urljoin, quote
+import requests
+import feedparser
+import pandas as pd
+from datetime import datetime
+from time import sleep
+from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-def fetch_page(url, headers, max_retries=3, timeout=15):
-    """Fetch page content with retries."""
-    for attempt in range(max_retries):
+# Top business news sites with RSS feeds
+RSS_FEEDS = [
+    # Major Business News
+    ("Wall Street Journal", "https://feeds.a.dj.com/rss/RSSBusinessNews.xml", False),
+    ("Financial Times", "https://www.ft.com/rss/home", False),
+    ("CNBC", "https://www.cnbc.com/id/100003114/device/rss/rss.html", False),
+    ("Reuters Business", "https://www.reutersagency.com/feed/?best-topics=business", False),
+    ("Bloomberg", "https://www.bloomberg.com/markets/feeds/sitemap_news.xml", False),
+    ("Business Insider", "https://www.businessinsider.com/rss", False),
+    ("Forbes", "https://www.forbes.com/business/feed/", False),
+    
+    # Tech and Startups
+    ("TechCrunch", "https://techcrunch.com/feed/", True),
+    ("VentureBeat", "https://venturebeat.com/feed/", True),
+    ("Wired Business", "https://www.wired.com/feed/category/business/latest/rss", False),
+    
+    # HR and Workforce News
+    ("HR Dive", "https://www.hrdive.com/feeds/news/", False),
+    ("Staffing Industry Analysts", "https://www2.staffingindustry.com/rss", False),
+    ("HR Executive", "https://hrexecutive.com/feed/", True),
+    
+    # Additional Sources
+    ("Fast Company", "https://www.fastcompany.com/latest/rss", False),
+    ("Inc.com", "https://www.inc.com/rss", True),
+    ("Entrepreneur", "https://www.entrepreneur.com/latest.rss", True),
+]
+
+class NewsCollector:
+    """Collects news articles from RSS feeds about specified companies"""
+    
+    def __init__(self, companies, max_articles_per_company=100):
+        """
+        Initialize the RSS feed collector
+        
+        Parameters:
+        ----------
+        companies : list
+            List of company names to collect news for
+        max_articles_per_company : int
+            Maximum articles to collect per company
+        """
+        self.companies = companies
+        self.max_articles_per_company = max_articles_per_company
+        self.collected_articles = {company: [] for company in companies}
+        self.processed_urls = set()
+        
+    def is_relevant_article(self, title, description, company):
+        """Check if article is relevant to the specified company"""
+        pattern = r'\b{}\b'.format(re.escape(company))
+        
+        if re.search(pattern, title, re.IGNORECASE):
+            return True
+            
+        if description and re.search(pattern, description, re.IGNORECASE):
+            return True
+            
+        return False
+    
+    def get_article_content(self, url):
+        """Fetch and extract the main content from an article URL"""
         try:
-            response = requests.get(url, headers=headers, timeout=timeout)
-            if response.status_code == 200:
-                return response.text
-            logging.error(f"HTTP {response.status_code} for {url}")
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            if response.status_code != 200:
+                logger.warning(f"HTTP {response.status_code} for {url}")
+                return ""
+                
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Remove noise elements
+            for element in soup(["script", "style", "nav", "header", "footer"]):
+                element.extract()
+            
+            # First try article tag
+            article = soup.find('article')
+            if article:
+                paragraphs = article.find_all('p')
+                if paragraphs:
+                    return ' '.join([p.get_text().strip() for p in paragraphs])
+            
+            # Try common content divs
+            for div_class in ['content', 'article-content', 'post-content', 'entry-content']:
+                content_div = soup.find('div', class_=re.compile(div_class))
+                if content_div:
+                    paragraphs = content_div.find_all('p')
+                    if paragraphs:
+                        return ' '.join([p.get_text().strip() for p in paragraphs])
+            
+            # Fall back to all paragraphs in the body
+            paragraphs = soup.find_all('p')
+            if paragraphs:
+                return ' '.join([p.get_text().strip() for p in paragraphs])
+            
+            return ""
+            
         except Exception as e:
-            logging.error(f"Failed to fetch {url}, attempt {attempt + 1}: {e}")
-            time.sleep(2)
-    return None
+            logger.error(f"Error fetching {url}: {str(e)}")
+            return ""
+    
+    def process_feed(self, source_name, feed_url, full_text):
+        """Process a single RSS feed and collect relevant articles"""
+        logger.info(f"Processing: {source_name}")
+        articles = []
+        
+        try:
+            feed = feedparser.parse(feed_url)
+            
+            if not feed.entries:
+                logger.warning(f"No entries found in {source_name}")
+                return []
+            
+            for entry in feed.entries:
+                # Check each company
+                for company in self.companies:
+                    # Skip if we already have enough articles for this company
+                    if len(self.collected_articles[company]) >= self.max_articles_per_company:
+                        continue
+                        
+                    title = entry.get('title', '')
+                    description = entry.get('summary', '')
+                    link = entry.get('link', '')
+                    
+                    # Skip if already processed
+                    if link in self.processed_urls:
+                        continue
+                    
+                    self.processed_urls.add(link)
+                    
+                    # Check if article is relevant to this company
+                    if self.is_relevant_article(title, description, company):
+                        # Get full content
+                        content = ""
+                        if full_text:
+                            content = entry.get('content', [{}])[0].get('value', '') if 'content' in entry else ''
+                            
+                        if not content or len(content) < 100:
+                            content = self.get_article_content(link)
+                        
+                        if not content:
+                            content = description
+                            
+                        # Get publication date
+                        pub_date = None
+                        if 'published_parsed' in entry and entry.published_parsed:
+                            pub_date = datetime(*entry.published_parsed[:6])
+                        elif 'updated_parsed' in entry and entry.updated_parsed:
+                            pub_date = datetime(*entry.updated_parsed[:6])
+                        else:
+                            pub_date = datetime.now()
+                            
+                        article = {
+                            'title': title,
+                            'content': content,
+                            'url': link,
+                            'date': pub_date.strftime('%Y-%m-%d'),
+                            'source': source_name
+                        }
+                        
+                        self.collected_articles[company].append(article)
+                        articles.append((company, article))
+                        
+                        logger.info(f"Collected article about {company} from {source_name}")
+                        
+                # Add a small delay to be respectful
+                sleep(0.1)
+                        
+        except Exception as e:
+            logger.error(f"Error processing {source_name}: {str(e)}")
+            
+        return articles
+    
+    def collect_articles(self):
+        """Collect articles from all configured RSS feeds"""
+        all_articles = []
+        
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_feed = {
+                executor.submit(self.process_feed, name, url, full_text): name
+                for name, url, full_text in RSS_FEEDS
+            }
+            
+            for future in future_to_feed:
+                name = future_to_feed[future]
+                try:
+                    articles = future.result()
+                    all_articles.extend(articles)
+                    logger.info(f"Completed {name}, found {len(articles)} relevant articles")
+                except Exception as e:
+                    logger.error(f"Error with {name}: {str(e)}")
+        
+        # Return all collected articles organized by company
+        return self.collected_articles
 
-def extract_text_with_bs4(html, url):
-    """Extract text from HTML using BeautifulSoup."""
-    if not html:
-        return ''
-    try:
-        soup = BeautifulSoup(html, 'html.parser')
-        # Remove scripts and styles
-        for script in soup(['script', 'style']):
-            script.decompose()
-        # Extract text from <p>, <article>, or main content areas
-        content = soup.find('article') or soup.find('div', class_=['content', 'article', 'post']) or soup.body
-        if content:
-            paragraphs = content.find_all('p')
-            text = ' '.join(p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True))
-            if text:
-                return text
-        logging.warning(f"No meaningful text found in {url}")
-        return ''
-    except Exception as e:
-        logging.error(f"Error extracting text from {url}: {e}")
-        return ''
-
-def is_relevant(text, title, url, query):
-    """Score relevance based on company name and industry keywords."""
-    relevance_keywords = [
-        'staffing', 'gig economy', 'temporary workers', 'on-demand labor', 
-        'workforce platform', 'hiring', 'jobs', 'labor', 'warehouse', 
-        'distribution center', 'manufacturing', 'supply chain'
-    ]
-    query_lower = query.lower()
-    content = (text.lower() + ' ' + title.lower() + ' ' + url.lower())
-    company_mentioned = query_lower in content
-    keyword_score = sum(1 for keyword in relevance_keywords if keyword in content)
-    # Relevant if company name is present or at least 2 industry keywords
-    return company_mentioned or keyword_score >= 2
-
-def collect_news_articles(query, use_dummy=False):
+def collect_news_for_companies(companies, max_articles=100):
     """
-    Collects news articles by scraping targeted sources for a given company.
+    Main function to collect news about specified companies
     
-    Args:
-        query (str): Company name (e.g., 'Traba', 'Instawork').
-        use_dummy (bool): If True, returns dummy data.
-    
+    Parameters:
+    ----------
+    companies : list
+        List of company names to collect news for
+    max_articles : int
+        Maximum number of articles to collect per company
+        
     Returns:
-        list: List of dicts with 'title', 'text', 'publication_date', 'url'.
+    -------
+    dict
+        Dictionary with companies as keys and lists of articles as values
     """
-    articles_data = []
+    collector = NewsCollector(companies, max_articles)
+    articles = collector.collect_articles()
     
-    if use_dummy:
-        logging.info(f"Using dummy data for {query}")
-        return [
-            {'title': f"{query} Raises Funds", 'text': f"{query} secures $20M for staffing innovation.",
-             'publication_date': '2025-03-01', 'url': 'http://example.com/dummy1'},
-            {'title': f"{query} Expands", 'text': f"{query} grows operations in NY.",
-             'publication_date': '2025-03-02', 'url': 'http://example.com/dummy2'}
-        ]
+    for company, company_articles in articles.items():
+        logger.info(f"Collected {len(company_articles)} articles for {company}")
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': 'https://www.google.com/'
-    }
-    
-    # Dynamic source templates for each company
-    query_encoded = quote(query.lower())
-    base_urls = [
-        f'https://www.crunchbase.com/organization/{query_encoded}',  # Company-specific Crunchbase page
-        f'https://www.linkedin.com/company/{query_encoded}/posts/',  # LinkedIn posts
-        f'https://www.bizjournals.com/search?q={query_encoded}',     # Business Journals search
-        f'https://news.google.com/search?q={query}+staffing+-inurl:({query}.com+{query}.work)'  # Google News with exclusions
-    ]
-    
-    all_articles = []
-    seen_urls = set()
-    
-    for base_url in base_urls:
-        logging.info(f"Scraping {base_url} for {query}")
-        html = fetch_page(base_url, headers)
-        if not html:
-            continue
-        
-        soup = BeautifulSoup(html, 'html.parser')
-        links = soup.find_all('a', href=True)
-        
-        for link in links[:50]:  # Limit to 50 links per source
-            title = link.get_text(strip=True) or 'No title'
-            url = urljoin(base_url, link['href'])
-            if url in seen_urls or any(domain in url for domain in [f'{query.lower()}.com', f'{query.lower()}.work']):
-                continue
-            
-            article_html = fetch_page(url, headers)
-            text = extract_text_with_bs4(article_html, url)
-            if not text:
-                continue
-            
-            if is_relevant(text, title, url, query):
-                all_articles.append({
-                    'title': title,
-                    'text': text,
-                    'publication_date': 'Unknown',  # Refine if date extraction needed
-                    'url': url
-                })
-                seen_urls.add(url)
-                logging.info(f"Collected: {title} - {url}")
-            time.sleep(1)  # Rate limiting
-    
-    articles_data = all_articles[:50]  # Cap at 50 total articles
-    logging.info(f"Collected {len(articles_data)} relevant articles for {query}")
-    return articles_data
+    return articles
