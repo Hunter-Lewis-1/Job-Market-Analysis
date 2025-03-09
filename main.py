@@ -1,112 +1,102 @@
 #!/usr/bin/env python3
 """
-Traba Job Market Analysis - Main Script
-Analyzes gig economy job market data to identify trends in wages and demand.
+Traba Job Market Analysis Tool - Main script
+Analyzes gig economy job markets to identify wage and demand trends
 """
 import os
-import pandas as pd
+import time
+import asyncio
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
+import pandas as pd
+from pathlib import Path
 
-from src.data_collection import collect_job_data
-from src.data_processing import process_job_data
-from src.analysis import (
-    analyze_wage_trends, 
-    analyze_demand_gaps, 
-    analyze_skill_needs
-)
-from src.visualization import (
-    generate_wage_heatmap,
-    generate_demand_chart,
-    generate_skill_chart,
-    generate_report
-)
+from src.data_collection import collect_jobs_async
+from src.data_processing import process_job_data, identify_key_skills
+from src.analysis import analyze_market_data
+from src.visualization import generate_visualizations, create_report
 
 # Configuration
-CITIES = [
-    "Chicago", "Miami", "Los Angeles", "Dallas", "Atlanta", 
-    "New York", "Houston", "Phoenix", "Philadelphia", "San Francisco"
-]
-SECTORS = ["warehouse", "distribution center", "event staff", "hospitality", "production"]
-OUTPUT_DIR = "output"
-DATA_DIR = "data"
+CONFIG = {
+    "cities": [
+        "Chicago", "Miami", "Los Angeles", "Dallas", "Atlanta", "New York"
+    ],
+    "sectors": [
+        "warehouse", "event staff", "hospitality", 
+        "distribution center", "production"
+    ],
+    "jobs_per_search": 20,
+    "data_dir": "data",
+    "output_dir": "output"
+}
 
 def setup_directories():
-    """Create necessary directories if they don't exist."""
-    for directory in [OUTPUT_DIR, DATA_DIR, f"{DATA_DIR}/raw", f"{DATA_DIR}/processed", f"{OUTPUT_DIR}/visualizations"]:
-        os.makedirs(directory, exist_ok=True)
+    """Create necessary project directories if they don't exist."""
+    for dir_path in [
+        CONFIG["data_dir"], 
+        f"{CONFIG['data_dir']}/raw", 
+        f"{CONFIG['data_dir']}/processed",
+        CONFIG["output_dir"], 
+        f"{CONFIG['output_dir']}/charts"
+    ]:
+        Path(dir_path).mkdir(parents=True, exist_ok=True)
 
-def main():
-    """Main execution function for the Traba Job Market Analysis."""
-    start_time = datetime.now()
-    print(f"Starting job market analysis: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+async def run_analysis():
+    """Run the complete job market analysis workflow."""
+    start_time = time.time()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     
+    print(f"Job Market Analysis - Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     setup_directories()
     
-    # Step 1: Collect job data (parallel for efficiency)
-    print("\n1. Collecting job data from Indeed...")
-    jobs = []
-    
-    # Using ThreadPoolExecutor for parallel scraping (improves performance)
-    with ThreadPoolExecutor(max_workers=min(10, len(CITIES))) as executor:
-        future_to_city = {executor.submit(collect_job_data, city, SECTORS): city for city in CITIES}
-        for future in future_to_city:
-            city_jobs = future.result()
-            jobs.extend(city_jobs)
-            print(f"  ✓ Collected {len(city_jobs)} jobs from {future_to_city[future]}")
+    # Step 1: Collect job data asynchronously
+    print(f"[1/4] Collecting job data for {len(CONFIG['cities'])} cities and {len(CONFIG['sectors'])} sectors...")
+    job_data = await collect_jobs_async(
+        CONFIG["cities"], 
+        CONFIG["sectors"],
+        CONFIG["jobs_per_search"]
+    )
     
     # Save raw data
-    raw_df = pd.DataFrame(jobs)
-    raw_df.to_csv(f"{DATA_DIR}/raw/job_listings_{datetime.now().strftime('%Y%m%d')}.csv", index=False)
-    print(f"  ✓ Total jobs collected: {len(jobs)}")
+    raw_data_path = f"{CONFIG['data_dir']}/raw/job_listings_{timestamp}.csv"
+    job_df = pd.DataFrame(job_data)
+    job_df.to_csv(raw_data_path, index=False)
+    print(f"      ✓ Collected {len(job_df)} job listings")
     
-    # Step 2: Process the data
-    print("\n2. Processing job data...")
-    processed_df = process_job_data(raw_df)
-    processed_df.to_csv(f"{DATA_DIR}/processed/processed_jobs_{datetime.now().strftime('%Y%m%d')}.csv", index=False)
-    print(f"  ✓ Processed {len(processed_df)} job listings")
+    # Step 2: Process data
+    print("[2/4] Processing and enriching job data...")
+    processed_df = process_job_data(job_df)
+    skill_data = identify_key_skills(processed_df)
+    processed_path = f"{CONFIG['data_dir']}/processed/processed_jobs_{timestamp}.csv"
+    processed_df.to_csv(processed_path, index=False)
     
-    # Step 3: Analyze the data
-    print("\n3. Analyzing job market data...")
+    # Step 3: Analyze data
+    print("[3/4] Analyzing market data...")
+    analysis_results = analyze_market_data(processed_df)
     
-    wage_analysis = analyze_wage_trends(processed_df)
-    print("  ✓ Wage analysis complete")
-    
-    demand_analysis = analyze_demand_gaps(processed_df)
-    print("  ✓ Demand gap analysis complete")
-    
-    skill_analysis = analyze_skill_needs(processed_df)
-    print("  ✓ Skill needs analysis complete")
-    
-    # Step 4: Generate visualizations
-    print("\n4. Generating visualizations...")
-    
-    wage_fig = generate_wage_heatmap(wage_analysis)
-    wage_fig.write_html(f"{OUTPUT_DIR}/visualizations/wage_heatmap.html")
-    print("  ✓ Wage heatmap generated")
-    
-    demand_fig = generate_demand_chart(demand_analysis)
-    demand_fig.write_html(f"{OUTPUT_DIR}/visualizations/demand_chart.html")
-    print("  ✓ Demand chart generated")
-    
-    skill_fig = generate_skill_chart(skill_analysis)
-    skill_fig.write_html(f"{OUTPUT_DIR}/visualizations/skill_chart.html")
-    print("  ✓ Skill chart generated")
-    
-    # Step 5: Generate report
-    print("\n5. Generating final report...")
-    report_path = generate_report(
-        wage_analysis, 
-        demand_analysis,
-        skill_analysis,
-        f"{OUTPUT_DIR}/traba_job_market_analysis.pdf"
+    # Step 4: Create visualizations and report
+    print("[4/4] Generating visualizations and final report...")
+    charts = generate_visualizations(
+        analysis_results,
+        f"{CONFIG['output_dir']}/charts",
+        timestamp
     )
-    print(f"  ✓ Report generated: {report_path}")
     
-    end_time = datetime.now()
-    duration = (end_time - start_time).total_seconds() / 60
-    print(f"\nAnalysis complete! Total runtime: {duration:.2f} minutes")
-    print(f"Results saved to {OUTPUT_DIR} directory")
+    report_path = create_report(
+        analysis_results, 
+        charts,
+        skill_data,
+        f"{CONFIG['output_dir']}/job_market_analysis_{timestamp}.pdf"
+    )
+    
+    execution_time = time.time() - start_time
+    print(f"\nAnalysis complete in {execution_time:.2f} seconds")
+    print(f"Report saved to: {report_path}")
+    print(f"Data saved to: {processed_path}")
+    return 0
+
+def main():
+    """Entry point for the job market analysis tool."""
+    return asyncio.run(run_analysis())
 
 if __name__ == "__main__":
     main()
