@@ -1,103 +1,112 @@
+#!/usr/bin/env python3
+"""
+Traba Job Market Analysis - Main Script
+Analyzes gig economy job market data to identify trends in wages and demand.
+"""
 import os
 import pandas as pd
-from src.data_collection import collect_news_articles
-from src.data_preprocessing import clean_text
-from src.sentiment_analysis import analyze_sentiment
-from src.topic_modeling import extract_topics
-from src.analysis import aggregate_data, calculate_sentiment_metrics, calculate_sentiment_by_year
-from src.visualization import plot_sentiment_comparison, generate_report
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+
+from src.data_collection import collect_job_data
+from src.data_processing import process_job_data
+from src.analysis import (
+    analyze_wage_trends, 
+    analyze_demand_gaps, 
+    analyze_skill_needs
+)
+from src.visualization import (
+    generate_wage_heatmap,
+    generate_demand_chart,
+    generate_skill_chart,
+    generate_report
+)
+
+# Configuration
+CITIES = [
+    "Chicago", "Miami", "Los Angeles", "Dallas", "Atlanta", 
+    "New York", "Houston", "Phoenix", "Philadelphia", "San Francisco"
+]
+SECTORS = ["warehouse", "distribution center", "event staff", "hospitality", "production"]
+OUTPUT_DIR = "output"
+DATA_DIR = "data"
+
+def setup_directories():
+    """Create necessary directories if they don't exist."""
+    for directory in [OUTPUT_DIR, DATA_DIR, f"{DATA_DIR}/raw", f"{DATA_DIR}/processed", f"{OUTPUT_DIR}/visualizations"]:
+        os.makedirs(directory, exist_ok=True)
 
 def main():
-    """Main function with debug checks and dummy data option."""
-    for dir_path in ["data/raw", "data/processed", "data/results", "reports", "visualizations"]:
-        os.makedirs(dir_path, exist_ok=True)
-
-    companies = ['Traba', 'Instawork', 'Wonolo', 'Ubeya', 'Sidekicker', 'Zenjob', 'Veryable', 'Shiftgig']
-    all_sentiment_metrics = []
-    all_topics = {}
-    use_dummy_data = False  # Set to True to test with dummy data
-
-    # Step 1: Data Collection
-    all_news_data = {}
-    for company in companies:
-        print(f"Collecting maximum news articles from Google News for {company}...")
-        news_data = collect_news_articles(company, use_dummy=use_dummy_data)
-        all_news_data[company] = news_data
-        print(f"{company}: Collected {len(news_data)} articles")
-    print("Step 1: Data Collection Complete. Sample data for Traba:")
-    traba_sample = pd.DataFrame(all_news_data['Traba']).head().to_string() if all_news_data['Traba'] else "No data"
-    print(traba_sample)
-
-    # Step 2: Preprocessing and Sentiment Analysis
-    all_processed_data = {}
-    all_tokenized_texts = {}
-    for company, news_data in all_news_data.items():
-        print(f"Processing {company}...")
-        if not news_data:
-            print(f"No news data for {company}")
-            all_processed_data[company] = pd.DataFrame()
-            all_tokenized_texts[company] = []
-            continue
-        for item in news_data:
-            if 'text' in item:
-                item['cleaned_text'] = clean_text(item['text'])
-                item['sentiment'], item['compound_score'], item['keyword_scores'] = analyze_sentiment(item['cleaned_text'])
-            else:
-                print(f"Warning: No 'text' key in article for {company}")
-        all_processed_data[company] = aggregate_data(news_data)
-        if all_processed_data[company].empty:
-            all_tokenized_texts[company] = []
-        else:
-            all_tokenized_texts[company] = all_processed_data[company]['cleaned_text'].dropna().tolist()
-            
-        # Calculate sentiment by year
-        yearly_metrics = calculate_sentiment_by_year(all_processed_data[company], company)
-        all_sentiment_metrics.extend(yearly_metrics)
-            
-    print("Step 2: Preprocessing and Sentiment Analysis Complete. Sample for Traba:")
-    traba_processed = all_processed_data['Traba'].head().to_string() if not all_processed_data['Traba'].empty else "No data"
-    print(traba_processed)
-
-    # Step 3: Topic Modeling
-    for company in companies:
-        if all_tokenized_texts[company]:
-            all_topics[company] = extract_topics(all_tokenized_texts[company], num_topics=5, top_n=10)
-        else:
-            all_topics[company] = []
-            print(f"No topics for {company} due to empty tokenized texts")
-    print("Step 3: Topic Modeling Complete. Sample topics for Traba:")
-    if 'Traba' in all_topics and all_topics['Traba']:
-        for topic_name, words in all_topics['Traba'][:3]:
-            print(f"{topic_name}: {', '.join(words)}")
-    else:
-        print("No topics for Traba")
-
-    # Step 4: Analysis and Data Export
-    for company in companies:
-        df = all_processed_data[company]
-        if not df.empty:
-            # Add year column
-            df['year'] = pd.to_datetime(df['publication_date'], errors='coerce').dt.year
-            # Export processed data with year
-            df.to_csv(f"data/processed/{company.lower()}_processed_data.csv", index=False)
-            # Export sentiment metrics by year
-            metrics_df = pd.DataFrame([m for m in all_sentiment_metrics if m['company'] == company])
-            metrics_df.to_csv(f"data/results/{company.lower()}_sentiment_by_year.csv", index=False)
-        else:
-            print(f"No data to export for {company}")
-            
-    print("Step 4: Analysis Complete. Sentiment metrics by year:")
-    metrics_summary = pd.DataFrame(all_sentiment_metrics)
-    print(metrics_summary.to_string() if not metrics_summary.empty else "Empty DataFrame")
-
-    # Step 5: Visualization and Reporting
-    plot_sentiment_comparison(all_sentiment_metrics, "visualizations/sentiment_comparison.html")
-    generate_report(all_sentiment_metrics, all_topics, "reports/sentiment_analysis_report.pdf")
-    print("Step 5: Visualization and Reporting Complete. Files saved:")
-    print("- visualizations/sentiment_comparison.html")
-    print("- visualizations/sentiment_comparison_distribution.html")
-    print("- reports/sentiment_analysis_report.pdf")
-    print("Project execution completed.")
+    """Main execution function for the Traba Job Market Analysis."""
+    start_time = datetime.now()
+    print(f"Starting job market analysis: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    setup_directories()
+    
+    # Step 1: Collect job data (parallel for efficiency)
+    print("\n1. Collecting job data from Indeed...")
+    jobs = []
+    
+    # Using ThreadPoolExecutor for parallel scraping (improves performance)
+    with ThreadPoolExecutor(max_workers=min(10, len(CITIES))) as executor:
+        future_to_city = {executor.submit(collect_job_data, city, SECTORS): city for city in CITIES}
+        for future in future_to_city:
+            city_jobs = future.result()
+            jobs.extend(city_jobs)
+            print(f"  ✓ Collected {len(city_jobs)} jobs from {future_to_city[future]}")
+    
+    # Save raw data
+    raw_df = pd.DataFrame(jobs)
+    raw_df.to_csv(f"{DATA_DIR}/raw/job_listings_{datetime.now().strftime('%Y%m%d')}.csv", index=False)
+    print(f"  ✓ Total jobs collected: {len(jobs)}")
+    
+    # Step 2: Process the data
+    print("\n2. Processing job data...")
+    processed_df = process_job_data(raw_df)
+    processed_df.to_csv(f"{DATA_DIR}/processed/processed_jobs_{datetime.now().strftime('%Y%m%d')}.csv", index=False)
+    print(f"  ✓ Processed {len(processed_df)} job listings")
+    
+    # Step 3: Analyze the data
+    print("\n3. Analyzing job market data...")
+    
+    wage_analysis = analyze_wage_trends(processed_df)
+    print("  ✓ Wage analysis complete")
+    
+    demand_analysis = analyze_demand_gaps(processed_df)
+    print("  ✓ Demand gap analysis complete")
+    
+    skill_analysis = analyze_skill_needs(processed_df)
+    print("  ✓ Skill needs analysis complete")
+    
+    # Step 4: Generate visualizations
+    print("\n4. Generating visualizations...")
+    
+    wage_fig = generate_wage_heatmap(wage_analysis)
+    wage_fig.write_html(f"{OUTPUT_DIR}/visualizations/wage_heatmap.html")
+    print("  ✓ Wage heatmap generated")
+    
+    demand_fig = generate_demand_chart(demand_analysis)
+    demand_fig.write_html(f"{OUTPUT_DIR}/visualizations/demand_chart.html")
+    print("  ✓ Demand chart generated")
+    
+    skill_fig = generate_skill_chart(skill_analysis)
+    skill_fig.write_html(f"{OUTPUT_DIR}/visualizations/skill_chart.html")
+    print("  ✓ Skill chart generated")
+    
+    # Step 5: Generate report
+    print("\n5. Generating final report...")
+    report_path = generate_report(
+        wage_analysis, 
+        demand_analysis,
+        skill_analysis,
+        f"{OUTPUT_DIR}/traba_job_market_analysis.pdf"
+    )
+    print(f"  ✓ Report generated: {report_path}")
+    
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds() / 60
+    print(f"\nAnalysis complete! Total runtime: {duration:.2f} minutes")
+    print(f"Results saved to {OUTPUT_DIR} directory")
 
 if __name__ == "__main__":
     main()
