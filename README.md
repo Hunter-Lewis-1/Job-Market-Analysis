@@ -1,40 +1,51 @@
-# Traba Sentiment Analysis Project 
+# Traba Job Market Analysis Tool
 
-This project analyzes the sentiment of news articles from Google News for Traba and its competitors, collecting the maximum number of articles available since 2021.
+This project analyzes gig economy job markets by scraping job board data to identify wage trends, skill demands, and market opportunities - providing strategic insights for Traba's business operations.
 
 ## Features
 
-- Collects up to 500 news articles per company from Google News (since 2021)
-- Uses retry logic to maximize successful text extraction
-- Performs sentiment analysis using VADER
-- Analyzes sentiment trends over time (by year)
-- Extracts key topics using NLP
-- Generates visualizations of sentiment trends
-- Creates comprehensive PDF reports
+- Collects job listings from Indeed for multiple cities and gig economy sectors
+- Uses asynchronous scraping for optimal performance
+- Normalizes wage data for consistent analysis
+- Extracts in-demand skills from job descriptions
+- Analyzes market opportunities based on wages, job volume, and fill rates
+- Generates interactive visualizations and comprehensive PDF reports
 
 ## To Run
 
 1. Install dependencies: `pip install -r requirements.txt`
-2. Run: `python main.py` 
+2. Run: `python main.py`
 
 ## Files
 
-- `requirements.txt`: Lists required packages.
-- `src/`: Contains the Python code.
-  - `data_collection.py`: Collects articles from Google News
-  - `data_preprocessing.py`: Cleans and prepares text data
-  - `sentiment_analysis.py`: Performs sentiment analysis
-  - `topic_modeling.py`: Extracts topics from text
-  - `analysis.py`: Calculates metrics and analyzes data
+- `requirements.txt`: Lists required packages
+- `src/`: Contains the Python code
+  - `data_collection.py`: Scrapes job listings from job boards
+  - `data_processing.py`: Cleans and normalizes job data
+  - `analysis.py`: Analyzes wage trends, demand gaps, and skills
   - `visualization.py`: Creates visualizations and reports
-- `data/`: Stores data (raw, processed, results).
-- `reports/`: Contains the PDF report.
-- `visualizations/`: Contains interactive charts.
-- `main.py`: The main script.
+- `data/`: Stores data (raw and processed)
+- `output/`: Contains charts and the final report
 
 ## Outputs
 
-- Sentiment comparison over time (HTML visualization)
-- Sentiment distribution by company and year
-- PDF report with sentiment metrics and key topics
-- CSV files with processed data and results
+- Wage heatmap by city and sector (HTML interactive)
+- Job demand by city and sector charts
+- Skill frequency and wage correlation visualizations
+- Market opportunity bubble chart
+- Comprehensive PDF report with analysis and recommendations
+
+## How This Helps Traba
+
+- Identifies markets with high demand but slow fill rates (opportunity for Traba's fast-filling model)
+- Highlights skills with highest wages (focus for worker training/recruitment)
+- Pinpoints geographic and sector-specific opportunities (expansion targets)
+- Provides wage benchmarks across markets (competitive positioning)
+- Maps demand patterns to inform platform design
+
+## Performance Optimizations
+
+- Asynchronous scraping with rate limiting for efficient data collection
+- Vectorized pandas operations for fast data processing
+- Memory-efficient data structures for large job datasets
+- Smart caching of intermediate results
