@@ -35,14 +35,6 @@ This project analyzes gig economy job markets by scraping job board data to iden
 - Market opportunity bubble chart
 - Comprehensive PDF report with analysis and recommendations
 
-## How This Helps Traba
-
-- Identifies markets with high demand but slow fill rates (opportunity for Traba's fast-filling model)
-- Highlights skills with highest wages (focus for worker training/recruitment)
-- Pinpoints geographic and sector-specific opportunities (expansion targets)
-- Provides wage benchmarks across markets (competitive positioning)
-- Maps demand patterns to inform platform design
-
 ## Performance Optimizations
 
 - Asynchronous scraping with rate limiting for efficient data collection
