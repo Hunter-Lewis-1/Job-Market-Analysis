@@ -1,6 +1,6 @@
 # Job Market Analysis Tool
 
-This project analyzes gig economy job markets by scraping job board data to identify wage trends, skill demands, and market opportunities - providing strategic insights for Gig Economy business operations.
+This project analyzes gig economy job markets by scraping job board data to identify wage trends, skill demands, and market opportunities - providing strategic insights for employers interested in Gig Economy Job Market dynamics.
 
 ## Features
 
