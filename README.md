@@ -1,6 +1,6 @@
-# Traba Job Market Analysis Tool
+# Job Market Analysis Tool
 
-This project analyzes gig economy job markets by scraping job board data to identify wage trends, skill demands, and market opportunities - providing strategic insights for Traba's business operations.
+This project analyzes gig economy job markets by scraping job board data to identify wage trends, skill demands, and market opportunities - providing strategic insights for Gig Economy business operations.
 
 ## Features
 
